@@ -43,3 +43,40 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+
+
+# macOS
+*.DS_Store
+
+# Windows
+Thumbs.db
+
+# Flutter specific
+.packages
+.flutter-plugins
+.flutter-plugins-dependencies
+.flutter-versions
+.melos_tool/
+
+# Android
+android/.gradle/
+android/.idea/
+android/local.properties
+android/app/generated/
+
+# iOS
+ios/Pods/
+ios/.symlinks/
+ios/Flutter/Flutter.framework
+ios/Flutter/Flutter.podspec
+ios/ServiceDefinitions.json
+Runner.xcworkspace/
+xcuserdata/
+
+# Web
+web/.dart_tool/
+web/.idea/
+
+# VS Code settings (optional, remove the # if you want to ignore it)
+#.vscode/
