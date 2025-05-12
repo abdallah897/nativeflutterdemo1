@@ -1,0 +1,35 @@
+<manifest
+    xmlns:android="http://schemas.android.com/apk/res/android"
+    package="com.example.nativeflutterdemo1"
+    xmlns:tools="http://schemas.android.com/tools">
+
+    <!-- Required permission -->
+    <uses-permission android:name="android.permission.INTERNET" />
+    <uses-permission android:name="android.permission.ACCESS_NETWORK_STATE" />
+
+    <application
+        android:label="nativeflutterdemo1"
+        android:name="android.app.Application"
+        android:icon="@mipmap/ic_launcher"
+        android:usesCleartextTraffic="true"
+        tools:ignore="Instantiatable,MissingClass"
+        android:supportsRtl="true"
+        android:networkSecurityConfig="@xml/network_security_config"
+        android:theme="@style/AppTheme">
+        <activity
+            android:name="com.oppwa.mobile.connect.checkout.dialog.CheckoutActivity"
+            android:theme="@style/Theme.Checkout.Light"
+            android:windowSoftInputMode="adjustResize"
+            android:exported="true"
+            android:launchMode="singleTask"
+
+            />
+
+
+
+
+    </application>
+
+
+</manifest>
+
