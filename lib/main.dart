@@ -1,6 +1,6 @@
 import 'package:flutter/material.dart';
 import 'ready_ui.dart' as ready;
-import 'custom_ui.dart' as custom;
+import 'CustomUi/custom_ui.dart' as custom;
 
 void main() => runApp(const MyApp());
 

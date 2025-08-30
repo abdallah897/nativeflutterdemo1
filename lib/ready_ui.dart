@@ -2,302 +2,153 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
+import 'dart:io' show Platform;
 
+/// A simple Flutter UI that demonstrates HyperPay Prebuilt UI payment
 class ReadyPaymentScreen extends StatefulWidget {
   const ReadyPaymentScreen({super.key});
 
   @override
-  State<ReadyPaymentScreen> createState() => _ReadyPaymentScreenState();
+  State<ReadyPaymentScreen> createState() => _ReadyPaymentScreen();
 }
 
-class _ReadyPaymentScreenState extends State<ReadyPaymentScreen> {
-  final _formKey = GlobalKey<FormState>();
-
-  final _cardHolderController = TextEditingController();
-  final _cardNumberController = TextEditingController();
-  final _expiryController = TextEditingController();
-  final _cvvController = TextEditingController();
-
-  String? _selectedBrand;
-  final List<String> _brands = ['VISA', 'MASTER', 'MADA', 'AMEX'];
-
+class _ReadyPaymentScreen extends State<ReadyPaymentScreen> {
   static const platform = MethodChannel('com.example.nativeflutterdemo1/hyperpay');
 
+  String status = "Ready to pay";
+
+  /// Calls your backend to get a checkout ID
   Future<String> fetchCheckoutId() async {
-    final response = await http.post(
-      Uri.parse("https://dev.hyperpay.com/hyperpay-demo/getcheckoutid.php"),
-    );
+    try {
+      final response = await http.post(
+        Uri.parse("https://integration.hyperpay.com/hyperpay-demo/getcheckoutid.php"),
+      );
 
-    if (response.statusCode == 200) {
-      final jsonData = json.decode(response.body);
-      if (jsonData.containsKey('id')) {
-        return jsonData['id'];
-      } else {
-        throw Exception("Checkout ID not found in response");
-      }
-    } else {
-      throw Exception("Failed to fetch checkout ID");
-    }
-  }
-
-  @override
-  void dispose() {
-    _cardHolderController.dispose();
-    _cardNumberController.dispose();
-    _expiryController.dispose();
-    _cvvController.dispose();
-    super.dispose();
-  }
-
-  void _submitForm() async {
-    if (_formKey.currentState?.validate() ?? false) {
-      final expiryParts = _expiryController.text.split('/');
-      final expiryMonth = expiryParts[0];
-      final expiryYear = expiryParts[1];
-
-      final checkoutId = await fetchCheckoutId();
-
-      final paymentData = {
-        "checkoutId": checkoutId,
-        "brand": _selectedBrand,
-        "cardHolder": _cardHolderController.text,
-        "cardNumber": _cardNumberController.text.replaceAll(' ', ''),
-        "expiryMonth": expiryMonth,
-        "expiryYear": expiryYear,
-        "cvv": _cvvController.text,
-      };
-
-      try {
-        final result = await platform.invokeMethod("startPaymentCustum", {
-          'paymentData': paymentData,
-        });
-
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Payment Completed: $result")),
-        );
-
-        // Fetch final payment status
-        final statusResponse = await http.get(
-          Uri.parse("https://dev.hyperpay.com/hyperpay-demo/getpaymentstatus.php?id=$checkoutId"),
-        );
-
-        if (statusResponse.statusCode == 200) {
-          final statusJson = json.decode(statusResponse.body);
-          final status = statusJson['result']['description'] ?? "Unknown status";
-
-          ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text("Payment Status: $status")),
-          );
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        if (data is String && data.isNotEmpty) {
+          return data;
         } else {
-          throw Exception("Failed to fetch payment status");
+          throw Exception("Invalid checkout ID response");
         }
-      } on PlatformException catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Error: ${e.message}")),
-        );
-      } catch (e) {
-        ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text("Unexpected error: $e")),
-        );
+      } else {
+        throw Exception("Failed to fetch checkout ID (HTTP ${response.statusCode})");
       }
+    } catch (e) {
+      debugPrint("fetchCheckoutId error: $e");
+      rethrow;
     }
   }
 
-  bool _isValidLuhn(String number) {
-    int sum = 0;
-    bool alternate = false;
+  /// Initiates the payment using the HyperPay native method channel
+  Future<void> initiatePayment() async {
+    setState(() => status = "Fetching checkout ID...");
 
-    for (int i = number.length - 1; i >= 0; i--) {
-      int n = int.parse(number[i]);
-      if (alternate) {
-        n *= 2;
-        if (n > 9) n -= 9;
+    try {
+      // Step 1: Get checkout ID from backend
+      final checkoutId = await fetchCheckoutId();
+      debugPrint("Checkout ID: $checkoutId");
+
+      // Step 2: Start payment via native code (Prebuilt UI)
+      final returnedId = await platform.invokeMethod<String>(
+        'startPayment',
+        {'checkoutId': checkoutId},
+      );
+
+      if (returnedId == null || returnedId.isEmpty) {
+        setState(() => status = "No checkout ID returned from SDK");
+        return;
       }
-      sum += n;
-      alternate = !alternate;
-    }
 
-    return sum % 10 == 0;
+      debugPrint("Returned checkout ID from native: $returnedId");
+      setState(() => status = "Checking payment status...");
+
+      // Step 3: Call backend again to verify transaction result
+      final statusResponse = await http.get(
+        Uri.parse("https://integration.hyperpay.com/hyperpay-demo/getpaymentstatus.php?id=$returnedId"),
+      );
+
+      debugPrint("Payment status response: ${statusResponse.body}");
+
+      if (statusResponse.statusCode == 200) {
+        final statusJson = json.decode(statusResponse.body);
+        String? description;
+
+        // Handle multiple possible formats of the response
+        if (statusJson['result'] != null && statusJson['result']['description'] != null) {
+          description = statusJson['result']['description'];
+        } else if (statusJson['description'] != null) {
+          description = statusJson['description'];
+        } else {
+          description = "Unknown response format.";
+        }
+
+        setState(() => status = "Payment Status: $description");
+      } else {
+        setState(() => status = "Failed to get payment status (HTTP ${statusResponse.statusCode})");
+      }
+    } on PlatformException catch (e) {
+      // Flutter <-> native communication failed
+      debugPrint("PlatformException: ${e.message}");
+      setState(() => status = "Platform error: ${e.message}");
+    } catch (e) {
+      // Any other error (network, logic, backend)
+      debugPrint("Error: $e");
+      setState(() => status = "Error: $e");
+    }
+  }
+
+  /// Initiates the payment using Apple Pay via native code
+  Future<void> initiateApplePay() async {
+    setState(() => status = "Starting Apple Pay...");
+
+    try {
+      final checkoutId = await fetchCheckoutId();
+      debugPrint("Apple Pay Checkout ID: $checkoutId");
+
+      final result = await platform.invokeMethod<Map>(
+        'startApplePay',
+        {'checkoutId': checkoutId},
+      );
+
+      if (result != null && result['status'] != null) {
+        setState(() => status = "Apple Pay: ${result['status']} - ${result['message']}");
+      } else {
+        setState(() => status = "Apple Pay failed or cancelled");
+      }
+    } on PlatformException catch (e) {
+      debugPrint("Apple Pay PlatformException: ${e.message}");
+      setState(() => status = "Apple Pay Platform Error: ${e.message}");
+    } catch (e) {
+      debugPrint("Apple Pay Error: $e");
+      setState(() => status = "Apple Pay Error: $e");
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      appBar: AppBar(title: const Text("Custom UI Payment")),
-      body: Padding(
-        padding: const EdgeInsets.all(16.0),
-        child: Form(
-          key: _formKey,
-          child: ListView(
-            children: [
-              FormField<String>(
-                initialValue: _selectedBrand,
-                validator: (value) {
-                  if (value == null || !_brands.contains(value)) {
-                    return 'Please select a valid payment brand';
-                  }
-                  return null;
-                },
-                builder: (FormFieldState<String> field) {
-                  return InputDecorator(
-                    decoration: InputDecoration(
-                      labelText: "Payment Brand",
-                      border: const OutlineInputBorder(),
-                      errorText: field.errorText,
-                    ),
-                    isEmpty: field.value == null || field.value!.isEmpty,
-                    child: DropdownButtonHideUnderline(
-                      child: DropdownButton<String>(
-                        value: field.value,
-                        isDense: true,
-                        onChanged: (value) {
-                          setState(() {
-                            _selectedBrand = value;
-                            field.didChange(value);
-                          });
-                        },
-                        items: _brands
-                            .map((brand) => DropdownMenuItem(
-                          value: brand,
-                          child: Text(brand),
-                        ))
-                            .toList(),
-                      ),
-                    ),
-                  );
-                },
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _cardNumberController,
-                keyboardType: TextInputType.number,
-                decoration: const InputDecoration(
-                  labelText: "Card Number",
-                  border: OutlineInputBorder(),
-                ),
-                inputFormatters: [
-                  LengthLimitingTextInputFormatter(16),
-                ],
-                validator: (value) {
-                  if (value == null || value.isEmpty) return "Card number is required";
-
-                  final number = value.replaceAll(RegExp(r'\s+'), '');
-                  if (_selectedBrand == 'AMEX' && number.length != 15) return "AMEX card must be 15 digits";
-                  if (_selectedBrand != 'AMEX' && number.length != 16) return "Card number must be 16 digits";
-                  if (!_isValidLuhn(number)) return "Invalid card number";
-                  return null;
-                },
-              ),
-              const SizedBox(height: 16),
-              TextFormField(
-                controller: _cardHolderController,
-                keyboardType: TextInputType.name,
-                decoration: const InputDecoration(
-                  labelText: "Card Holder Name",
-                  border: OutlineInputBorder(),
-                ),
-                validator: (value) {
-                  if (value == null || value.trim().isEmpty) return "Enter card holder name";
-                  if (!RegExp(r"^[A-Za-z ]+$").hasMatch(value)) return "Name must contain letters only";
-                  return null;
-                },
-              ),
-              const SizedBox(height: 16),
-              Row(
-                children: [
-                  Expanded(
-                    flex: 2,
-                    child: TextFormField(
-                      controller: _expiryController,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                        labelText: "Expiry (MM/YY)",
-                        hintText: "MM/YY",
-                        border: OutlineInputBorder(),
-                      ),
-                      inputFormatters: [
-                        FilteringTextInputFormatter.digitsOnly,
-                        LengthLimitingTextInputFormatter(4),
-                        _ExpiryDateTextInputFormatter(),
-                      ],
-                      validator: (value) {
-                        if (value == null || !RegExp(r'^\d{2}/\d{2}$').hasMatch(value)) {
-                          return "Invalid MM/YY format";
-                        }
-
-                        final expiryParts = value.split('/');
-                        final expiryMonth = int.parse(expiryParts[0]);
-                        final expiryYear = int.parse(expiryParts[1]);
-
-                        final currentDate = DateTime.now();
-                        final currentYear = currentDate.year % 100;
-                        final currentMonth = currentDate.month;
-
-                        if (expiryMonth < 1 || expiryMonth > 12) return "Invalid expiry month";
-                        if (expiryYear < currentYear || (expiryYear == currentYear && expiryMonth < currentMonth)) {
-                          return "Card is expired";
-                        }
-
-                        return null;
-                      },
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    flex: 1,
-                    child: TextFormField(
-                      controller: _cvvController,
-                      keyboardType: TextInputType.number,
-                      decoration: const InputDecoration(
-                        labelText: "CVV",
-                        border: OutlineInputBorder(),
-                      ),
-                      validator: (value) {
-                        if (value == null || value.isEmpty) return "CVV is required";
-                        if (!RegExp(r'^\d+$').hasMatch(value)) return "CVV must be digits only";
-
-                        final length = value.length;
-                        if (_selectedBrand == 'AMEX' && length != 4) return "AMEX CVV must be 4 digits";
-                        if (_selectedBrand != 'AMEX' && length != 3) return "CVV must be 3 digits";
-                        return null;
-                      },
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 24),
+      appBar: AppBar(title: const Text("HyperPay Demo")),
+      body: Center(
+        child: Column(
+          mainAxisAlignment: MainAxisAlignment.center,
+          children: [
+            Text(status, textAlign: TextAlign.center),
+            const SizedBox(height: 20),
+            ElevatedButton(
+              onPressed: initiatePayment,
+              child: const Text("Pay Now"),
+            ),
+            const SizedBox(height: 20),
+            if (Platform.isIOS)
               ElevatedButton(
-                onPressed: _submitForm,
-                child: const Text("Submit Payment"),
+                onPressed: initiateApplePay,
+                style: ElevatedButton.styleFrom(backgroundColor: Colors.black),
+                child: const Text("Pay with Apple Pay", style: TextStyle(color: Colors.white)),
               ),
-            ],
-          ),
+          ],
         ),
       ),
-    );
-  }
-}
-
-class _ExpiryDateTextInputFormatter extends TextInputFormatter {
-  @override
-  TextEditingValue formatEditUpdate(
-      TextEditingValue oldValue, TextEditingValue newValue) {
-    final digitsOnly = newValue.text.replaceAll(RegExp(r'\D'), '');
-
-    String formatted = '';
-    if (digitsOnly.length >= 2) {
-      formatted = digitsOnly.substring(0, 2);
-      if (digitsOnly.length > 2) {
-        formatted += '/' +
-            digitsOnly.substring(2, digitsOnly.length > 4 ? 4 : digitsOnly.length);
-      }
-    } else {
-      formatted = digitsOnly;
-    }
-
-    return TextEditingValue(
-      text: formatted,
-      selection: TextSelection.collapsed(offset: formatted.length),
     );
   }
 }
